@@ -59,7 +59,7 @@ articles stay unfiltered for up to about 15 minutes.
 - A **scheduled feed refresh**: the built-in Docker cron, a system cron, or a
   web cron. See [When the filter runs](#when-the-filter-runs). Without one, the
   filter only runs when you press *Run now*.
-- A Cloudflare account. The free plan is enough.
+- A Cloudflare account. The free plan is enough for checking at least 100 articles per day, possibly more (depending on model choosen).
 
 ## Installation
 

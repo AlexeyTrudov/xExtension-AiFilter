@@ -11,6 +11,10 @@ extra service, cron job or API client to maintain. Inference runs on
 [Cloudflare Workers AI](https://developers.cloudflare.com/workers-ai/), whose
 free daily allowance comfortably covers a personal feed reader.
 
+> **Note:** filtering decisions are made by an AI model and can be wrong, and the
+> model runs under your own Cloudflare account. Read the [Disclaimer](#disclaimer)
+> before relying on this extension.
+
 ## Features
 
 - **Prompt-driven scoring.** Write a short profile of yourself, then add
@@ -384,6 +388,46 @@ The extension keeps its state per user in
 To uninstall, disable the extension in *Settings → Extensions*, delete the
 `xExtension-AiFilter` folder, and optionally delete the data folder above.
 Articles that were marked as read and the `Top` label stay as they are.
+
+## Disclaimer
+
+This is an independent hobby project, provided “as is”, without warranty of any
+kind, as stated in the [MIT License](LICENSE). By installing and using it, you
+accept the following.
+
+- **Automated decisions can be wrong.** Articles are hidden or labelled based on
+  the output of a third-party AI model, which can misjudge, misread or overlook
+  content, including content that matters to you. Hidden articles are only
+  marked as read, but you may never notice them. Do not rely on this extension
+  for information you cannot afford to miss, such as safety, legal, medical or
+  financial notices.
+- **Not advice.** Scores and reasons are machine-generated. They are not
+  editorial, financial, legal or any other professional advice, and they do not
+  represent the opinion of the author.
+- **Costs are yours.** The extension calls Cloudflare Workers AI under your own
+  account. Any charges, quota limits or account actions resulting from its use
+  are your responsibility, including usage beyond the free allowance, price
+  changes and misconfiguration. Keep an eye on your usage in the Cloudflare
+  dashboard.
+- **Your data goes to a third party.** Article titles and text, your prompts and
+  your reader profile are sent to Cloudflare and processed under Cloudflare's
+  terms and privacy policy. Make sure this is acceptable for your content and
+  complies with the laws and terms that apply to you. Avoid putting sensitive
+  personal information into the reader profile.
+- **Fetching websites.** When enabled, the extension downloads article pages
+  from your server. You are responsible for respecting the terms of the
+  websites it accesses.
+- **Things can change.** Models, APIs, prices and FreshRSS internals can change
+  at any time and break the extension or alter its behaviour.
+- **No affiliation.** This project is not affiliated with, endorsed by or
+  sponsored by the FreshRSS project or Cloudflare, Inc. All product names and
+  trademarks belong to their respective owners.
+
+To the maximum extent permitted by applicable law, the author and contributors
+are not liable for any direct, indirect, incidental or consequential damages
+arising from the use of, or inability to use, this software, including missed
+information, data loss, service charges or account restrictions. Use it at your
+own risk.
 
 ## License
 

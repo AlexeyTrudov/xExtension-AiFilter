@@ -1,0 +1,265 @@
+<?php
+/** @var AiFilterExtension $this */
+$conf = $this->conf();
+$state = $this->loadState();
+$categories = FreshRSS_Factory::createCategoryDao()->listCategories(prePopulateFeeds: false, details: false);
+$e = static fn(string $s): string => htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
+$hasToken = $this->confString('cf_api_token') !== '';
+$configureUrl = _url('extension', 'configure', 'e', urlencode($this->getName()));
+?>
+<link rel="stylesheet" href="<?= $this->getFileUrl('style.css') ?>" />
+
+<?php if ($this->noticeMessage !== ''): ?>
+	<p class="alert alert-warn aif-runmsg"><?= $e($this->noticeMessage) ?></p>
+<?php endif; ?>
+
+<div class="aif-status">
+	<?php if ($this->confString('cf_account_id') === '' || !$hasToken): ?>
+		<p class="alert alert-error">Cloudflare credentials are not set — the filter is idle. Fill in the account ID and API token below.</p>
+	<?php endif; ?>
+	<?php $pending = $this->pendingCount(); ?>
+	<p>
+		Last run: <strong><?= $state['last_run'] > 0 ? $e(date('Y-m-d H:i', $state['last_run'])) : 'never' ?></strong>
+		&nbsp;·&nbsp;
+		Scored up to: <strong><?= $state['last_id'] !== '' ? $e(date('Y-m-d H:i', (int)((int)$state['last_id'] / 1000000))) : 'not initialised (first run pending)' ?></strong>
+		&nbsp;·&nbsp;
+		Queue: <strong><?= $pending === null ? '—' : ($pending > 500 ? '500+' : $pending) ?></strong>
+	</p>
+</div>
+
+<form method="post" action="<?= $configureUrl ?>">
+	<input type="hidden" name="_csrf" value="<?= FreshRSS_Auth::csrfToken() ?>" />
+	<div class="form-group form-actions">
+		<div class="group-controls">
+			<button type="submit" class="btn" name="aif_action" value="run_now">▶ Run now</button>
+			<button type="submit" class="btn" name="aif_action" value="reset_prompts">↺ Reset prompts</button>
+			<p class="aif-hint">“Run now” scores the next portion of unread articles immediately (ignoring the schedule guards).
+				“Reset prompts” restores the built-in universal rules and default prompt; category prompts and the reader profile are kept.</p>
+		</div>
+	</div>
+</form>
+
+<form method="post" action="<?= $configureUrl ?>">
+	<input type="hidden" name="_csrf" value="<?= FreshRSS_Auth::csrfToken() ?>" />
+
+	<legend>Cloudflare Workers AI</legend>
+	<div class="form-group">
+		<label class="group-name" for="aif_cf_account_id">Account ID</label>
+		<div class="group-controls">
+			<input type="text" name="aif_cf_account_id" id="aif_cf_account_id" value="<?= $e($this->confString('cf_account_id')) ?>" autocomplete="off" />
+		</div>
+	</div>
+	<div class="form-group">
+		<label class="group-name" for="aif_cf_api_token">API token</label>
+		<div class="group-controls">
+			<input type="password" name="aif_cf_api_token" id="aif_cf_api_token" value="" autocomplete="new-password"
+				placeholder="<?= $hasToken ? '•••••••• saved — leave empty to keep' : '' ?>" />
+			<p class="aif-hint">Create it in the Cloudflare dashboard with the “Workers AI” API token template. The saved token is never shown again.</p>
+		</div>
+	</div>
+	<div class="form-group">
+		<label class="group-name" for="aif_cf_model">Model</label>
+		<div class="group-controls">
+			<input type="text" name="aif_cf_model" id="aif_cf_model" value="<?= $e($this->confString('cf_model')) ?>" class="aif-wide" />
+			<p class="aif-hint">Default <code>@cf/qwen/qwen3-30b-a3b-fp8</code>: cheap and strongly multilingual (its reasoning mode is switched off automatically).
+				Alternatives: <code>@cf/openai/gpt-oss-20b</code> · <code>@cf/mistralai/mistral-small-3.1-24b-instruct</code> (no reasoning mode, most predictable) ·
+				<code>@cf/meta/llama-3.3-70b-instruct-fp8-fast</code> (pricier). Avoid <code>@cf/google/gemma-4-26b-a4b-it</code>: it reasons by default and
+				burns the token budget on thinking. After switching, press “Run now” and check the log.</p>
+		</div>
+	</div>
+
+	<legend>Scoring</legend>
+	<div class="form-group">
+		<label class="group-name" for="aif_relevance_threshold">Keep threshold</label>
+		<div class="group-controls">
+			<input type="number" step="0.5" min="0" max="10" name="aif_relevance_threshold" id="aif_relevance_threshold" value="<?= $e($this->confString('relevance_threshold')) ?>" />
+			<p class="aif-hint">Articles scoring below this are marked as read (hidden).</p>
+		</div>
+	</div>
+	<div class="form-group">
+		<label class="group-name" for="aif_exceptional_threshold">Label threshold</label>
+		<div class="group-controls">
+			<input type="number" step="0.5" min="0" max="10" name="aif_exceptional_threshold" id="aif_exceptional_threshold" value="<?= $e($this->confString('exceptional_threshold')) ?>" />
+			<p class="aif-hint">Articles scoring strictly above this get the label below (created automatically; must not match a category name).</p>
+			<input type="text" name="aif_exceptional_label" id="aif_exceptional_label" value="<?= $e($this->confString('exceptional_label')) ?>" />
+		</div>
+	</div>
+
+	<legend>Scheduling &amp; limits</legend>
+	<div class="form-group">
+		<label class="group-name" for="aif_batch_size">Articles per run</label>
+		<div class="group-controls">
+			<input type="number" min="1" max="200" name="aif_batch_size" id="aif_batch_size" value="<?= $e($this->confString('batch_size')) ?>" />
+		</div>
+	</div>
+	<div class="form-group">
+		<label class="group-name" for="aif_cf_batch_size">Articles per LLM call</label>
+		<div class="group-controls">
+			<input type="number" min="1" max="20" name="aif_cf_batch_size" id="aif_cf_batch_size" value="<?= $e($this->confString('cf_batch_size')) ?>" />
+		</div>
+	</div>
+	<div class="form-group">
+		<label class="group-name" for="aif_interval_minutes">Min. minutes between runs</label>
+		<div class="group-controls">
+			<input type="number" min="0" max="1440" name="aif_interval_minutes" id="aif_interval_minutes" value="<?= $e($this->confString('interval_minutes')) ?>" />
+			<p class="aif-hint">Mainly prevents duplicate runs when refreshes fire close together. Keep it below your feed-refresh interval so the filter runs on every refresh.</p>
+		</div>
+	</div>
+	<div class="form-group">
+		<label class="group-name" for="aif_max_run_seconds">Max seconds per run</label>
+		<div class="group-controls">
+			<input type="number" min="30" max="480" name="aif_max_run_seconds" id="aif_max_run_seconds" value="<?= $e($this->confString('max_run_seconds')) ?>" />
+			<p class="aif-hint">Unfinished articles are picked up by the next run. With a web cron, keep this well below PHP’s <code>max_execution_time</code>.</p>
+		</div>
+	</div>
+	<div class="form-group">
+		<label class="group-name" for="aif_backlog_days">Backlog window (days)</label>
+		<div class="group-controls">
+			<input type="number" min="1" max="30" name="aif_backlog_days" id="aif_backlog_days" value="<?= $e($this->confString('backlog_days')) ?>" />
+			<p class="aif-hint">Articles older than this are never scored (they simply stay unread). Protects the LLM quota after an OPML import.</p>
+		</div>
+	</div>
+	<div class="form-group">
+		<div class="group-controls">
+			<label class="checkbox" for="aif_cron_only">
+				<input type="checkbox" name="aif_cron_only" id="aif_cron_only" value="1" <?= !empty($conf['cron_only']) ? 'checked="checked"' : '' ?> />
+				Run only during scheduled refreshes (CLI cron or web-cron URL), not during refreshes started in the browser — recommended, since a run can take a minute or two
+			</label>
+		</div>
+	</div>
+
+	<legend>Full-article fetching</legend>
+	<div class="form-group">
+		<div class="group-controls">
+			<label class="checkbox" for="aif_fetch_full">
+				<input type="checkbox" name="aif_fetch_full" id="aif_fetch_full" value="1" <?= !empty($conf['fetch_full']) ? 'checked="checked"' : '' ?> />
+				Fetch the article page when the RSS summary is short
+			</label>
+		</div>
+	</div>
+	<div class="form-group">
+		<label class="group-name" for="aif_fetch_summary_cutoff">Fetch if summary shorter than (chars)</label>
+		<div class="group-controls">
+			<input type="number" min="0" max="20000" name="aif_fetch_summary_cutoff" id="aif_fetch_summary_cutoff" value="<?= $e($this->confString('fetch_summary_cutoff')) ?>" />
+		</div>
+	</div>
+	<div class="form-group">
+		<label class="group-name" for="aif_fetch_text_clip">Text sent to the LLM (chars)</label>
+		<div class="group-controls">
+			<input type="number" min="500" max="20000" name="aif_fetch_text_clip" id="aif_fetch_text_clip" value="<?= $e($this->confString('fetch_text_clip')) ?>" />
+		</div>
+	</div>
+	<div class="form-group">
+		<label class="group-name" for="aif_fetch_timeout">Fetch timeout (seconds)</label>
+		<div class="group-controls">
+			<input type="number" min="1" max="30" name="aif_fetch_timeout" id="aif_fetch_timeout" value="<?= $e($this->confString('fetch_timeout')) ?>" />
+		</div>
+	</div>
+	<div class="form-group">
+		<label class="group-name" for="aif_fetch_skip_hosts">Never fetch from these hosts</label>
+		<div class="group-controls">
+			<textarea name="aif_fetch_skip_hosts" id="aif_fetch_skip_hosts" rows="5" class="aif-wide"><?=
+				$e(implode("\n", is_array($conf['fetch_skip_hosts']) ? $conf['fetch_skip_hosts'] : []))
+			?></textarea>
+			<p class="aif-hint">One host per line (sites whose pages cannot be fetched, or whose feeds already contain the full content).</p>
+		</div>
+	</div>
+
+	<legend>Reader profile</legend>
+	<div class="form-group">
+		<label class="group-name" for="aif_reader_profile">About you</label>
+		<div class="group-controls">
+			<textarea name="aif_reader_profile" id="aif_reader_profile" rows="5" class="aif-wide aif-prompt"
+				placeholder="e.g. Software engineer in Toronto. Interested in distributed systems, urban planning and personal finance. Not interested in celebrity news or sports. Reads English and French."><?=
+				$e($this->confString('reader_profile'))
+			?></textarea>
+			<p class="aif-hint">Optional, but this is where personalisation happens. Placed in front of every scoring prompt (not the ads-only one):
+				describe who you are, what you care about, what you never want to see, and which languages you read.</p>
+		</div>
+	</div>
+
+	<legend>Prompts</legend>
+	<p class="aif-hint">Leave a prompt exactly as shipped and it stays linked to the built-in default, so later improvements to the
+		extension reach it automatically. Edit it and your version is stored instead — use “Reset prompts” above to go back.</p>
+	<div class="form-group">
+		<label class="group-name" for="aif_universal_rules">Universal rules (used for every scored category)</label>
+		<div class="group-controls">
+			<textarea name="aif_universal_rules" id="aif_universal_rules" rows="14" class="aif-wide aif-prompt"><?= $e($this->confString('universal_rules')) ?></textarea>
+		</div>
+	</div>
+	<div class="form-group">
+		<label class="group-name" for="aif_default_prompt">Default prompt (categories without their own)</label>
+		<div class="group-controls">
+			<textarea name="aif_default_prompt" id="aif_default_prompt" rows="6" class="aif-wide aif-prompt"><?= $e($this->confString('default_prompt')) ?></textarea>
+		</div>
+	</div>
+
+	<legend>Categories</legend>
+	<p class="aif-hint">Each category is handled in one of three ways. <strong>Score</strong> uses the category prompt (empty = the default prompt above).
+		<strong>Pass through</strong> keeps everything without calling the LLM at all. <strong>Remove ads only</strong> calls the LLM with a
+		dedicated advertising-detection prompt — the reader profile, universal rules and category prompt are ignored, and nothing but advertising is removed.
+		Settings are stored by category name: after renaming a category, set its mode and prompt again.</p>
+	<?php foreach ($categories as $cat): ?>
+		<?php
+			$catName = $cat->name();
+			$mode = $this->catMode($catName);
+			$key = $e(AiFilterExtension::catFieldKey($catName));
+		?>
+		<div class="form-group">
+			<label class="group-name" for="aif_cat_mode_<?= $cat->id() ?>"><?= $e($catName) ?></label>
+			<div class="group-controls">
+				<select name="aif_cat_mode[<?= $key ?>]" id="aif_cat_mode_<?= $cat->id() ?>">
+					<option value="score" <?= $mode === 'score' ? 'selected="selected"' : '' ?>>Score with the prompt below</option>
+					<option value="pass" <?= $mode === 'pass' ? 'selected="selected"' : '' ?>>Pass everything through (no LLM call)</option>
+					<option value="ads" <?= $mode === 'ads' ? 'selected="selected"' : '' ?>>Remove advertising only</option>
+				</select>
+				<textarea name="aif_cat_prompt[<?= $key ?>]" id="aif_cat_prompt_<?= $cat->id() ?>" rows="8" class="aif-wide aif-prompt"
+					placeholder="Empty — the default prompt above is used."
+					<?= $mode === 'score' ? '' : 'readonly="readonly"' ?>><?= $e($this->categoryPrompt($catName)) ?></textarea>
+			</div>
+		</div>
+	<?php endforeach; ?>
+
+	<legend>Maintenance</legend>
+	<div class="form-group">
+		<div class="group-controls">
+			<label class="checkbox" for="aif_clear_log">
+				<input type="checkbox" name="aif_clear_log" id="aif_clear_log" value="1" />
+				Clear the log on save
+			</label>
+		</div>
+	</div>
+
+	<div class="form-group form-actions">
+		<div class="group-controls">
+			<button type="submit" class="btn btn-important">Save</button>
+		</div>
+	</div>
+</form>
+
+<legend>Log</legend>
+<div class="aif-logbox">
+	<input type="radio" name="aif-logfilter" id="aif-f-all" checked="checked" />
+	<label for="aif-f-all">All</label>
+	<input type="radio" name="aif-logfilter" id="aif-f-kept" />
+	<label for="aif-f-kept">Kept</label>
+	<input type="radio" name="aif-logfilter" id="aif-f-skip" />
+	<label for="aif-f-skip">Removed</label>
+	<input type="radio" name="aif-logfilter" id="aif-f-sys" />
+	<label for="aif-f-sys">System</label>
+
+	<div class="aif-log">
+	<?php foreach ($this->logTail(300) as $line): ?>
+		<?php
+			if (trim($line) === '') {
+				continue;
+			}
+			preg_match('/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}) (\w+)\s+(.*)$/u', $line, $m);
+			$ts = $m[1] ?? '';
+			$type = $m[2] ?? 'INFO';
+			$rest = $m[3] ?? $line;
+		?>
+		<div class="aif-line aif-<?= $e($type) ?>"><span class="aif-ts"><?= $e($ts) ?></span> <span class="aif-type"><?= $e($type) ?></span> <?= $e($rest) ?></div>
+	<?php endforeach; ?>
+	</div>
+</div>

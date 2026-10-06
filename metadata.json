@@ -1,0 +1,8 @@
+{
+	"name": "AI Filter",
+	"entrypoint": "AiFilter",
+	"author": "AlexeyTrudov",
+	"description": "Scores new unread articles with an LLM (Cloudflare Workers AI) against your own prompts, hides the irrelevant ones and labels the best. Runs automatically during scheduled feed refreshes.",
+	"version": "2.0.0",
+	"type": "user"
+}
